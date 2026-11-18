@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<title>个人所得税</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#ffffff">
+<link rel="preload" as="image" href="start.png">
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: #fff;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #startPage {
+    position: fixed; inset: 0; z-index: 99999;
+    background: #fff url('start.png') center center / cover no-repeat;
+    transition: opacity .25s ease;
+  }
+  #startPage img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  #startPage.is-hidden { opacity: 0; pointer-events: none; }
+  #main { position: fixed; inset: 0; opacity: 0; transition: opacity .25s ease; }
+  #main.is-ready { opacity: 1; }
+  #app-frame { border: 0; width: 100%; height: 100%; display: block; background: #fff; }
+  #errBox {
+    display: none; position: fixed; inset: 0; z-index: 100000;
+    padding: 40px 24px; box-sizing: border-box;
+    font: 15px/1.7 -apple-system, 'PingFang SC', sans-serif;
+    color: #666; background: #fff; text-align: center;
+  }
+</style>
+</head>
+<body>
+  <div id="startPage"><img src="start.png" alt="启动图"></div>
+  <div id="main"></div>
+  <div id="errBox"><p id="errText"></p></div>
+
+  <script src="cordova.js"></script>
+  <script>
+  (function () {
+    'use strict';
+
+    var APP_ORIGIN = 'https://files.flongli.top/';
+    var ALLOWED_HOST = 'files.flongli.top';
+    var START_MS = 1200;
+
+    var frame = null;
+    var lastGoodUrl = null;
+    var startHidden = false;
+
+    function $(id) { return document.getElementById(id); }
+
+    function fatal(msg) {
+      var box = $('errBox');
+      if (box) { $('errText').textContent = msg; box.style.display = 'block'; }
+    }
+
+    function hideStart() {
+      if (startHidden) return;
+      startHidden = true;
+      var sp = $('startPage');
+      if (sp) {
+        sp.classList.add('is-hidden');
+        setTimeout(function () {
+          try { if (sp.parentNode) sp.parentNode.removeChild(sp); } catch (e) {}
+        }, 300);
+      }
+      var main = $('main');
+      if (main) main.classList.add('is-ready');
+    }
+
+    function buildStartUrl() {
+      var base = APP_ORIGIN.replace(/\/?$/, '/');
+      return base + 'mine.html?in_app=1&ios_shell=1';
+    }
+
+    function isOurUrl(href) {
+      if (!href) return false;
+      try { return new URL(href).hostname === ALLOWED_HOST; } catch (e) { return String(href).indexOf(ALLOWED_HOST) >= 0; }
+    }
+
+    function postToFrame(msg) {
+      try {
+        if (frame && frame.contentWindow) frame.contentWindow.postMessage(msg, '*');
+      } catch (e) {}
+    }
+
+    function mount(url) {
+      var main = $('main');
+      if (!main) return;
+      if (frame) { if (url) frame.src = url; return; }
+
+      frame = document.createElement('iframe');
+      frame.id = 'app-frame';
+      frame.setAttribute('title', '应用');
+      frame.setAttribute('allow', 'clipboard-read; clipboard-write');
+      frame.setAttribute('referrerpolicy', 'no-referrer-when-downgrade');
+      frame.src = url || buildStartUrl();
+      lastGoodUrl = frame.src;
+
+      frame.addEventListener('load', function () {
+        try {
+          var href = frame.contentWindow && frame.contentWindow.location && frame.contentWindow.location.href;
+          if (isOurUrl(href)) lastGoodUrl = href;
+        } catch (e) {}
+        postToFrame({
+          source: 'tax-shell',
+          type: 'device-hint',
+          ua: String(navigator.userAgent || ''),
+          model: (window.device && window.device.model) ? String(window.device.model) : '',
+          platform: 'ios'
+        });
+      });
+
+      main.appendChild(frame);
+      setTimeout(hideStart, 250);
+    }
+
+    // 外部链接：交给系统浏览器 / 唤起 App
+    function openExternal(url) {
+      var u = String(url || '').trim();
+      if (!u) return false;
+      try {
+        if (window.cordova && cordova.InAppBrowser && typeof cordova.InAppBrowser.open === 'function') {
+          cordova.InAppBrowser.open(u, '_system');
+          return true;
+        }
+      } catch (e) {}
+      try { window.open(u, '_system'); return true; } catch (e) {}
+      try { window.location.href = u; return true; } catch (e) {}
+      return false;
+    }
+
+    // 剪贴板：iOS 上优先 navigator.clipboard，失败退化到 execCommand
+    function copyText(text) {
+      var t = String(text == null ? '' : text);
+      if (!t) return Promise.resolve(false);
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(t).then(function () { return true; }).catch(function () { return legacyCopy(t); });
+      }
+      return Promise.resolve(legacyCopy(t));
+    }
+    function legacyCopy(t) {
+      try {
+        var ta = document.createElement('textarea');
+        ta.value = t;
+        ta.setAttribute('readonly', '');
+        ta.style.cssText = 'position:fixed;top:-1000px;left:0;opacity:0;';
+        document.body.appendChild(ta);
+        ta.select();
+        if (typeof ta.setSelectionRange === 'function') ta.setSelectionRange(0, t.length);
+        var ok = !!(document.execCommand && document.execCommand('copy'));
+        document.body.removeChild(ta);
+        return ok;
+      } catch (e) { return false; }
+    }
+
+    window.addEventListener('message', function (ev) {
+      var d = ev && ev.data;
+      if (!d || typeof d !== 'object') return;
+      if (d.source && d.source !== 'tax-platform-h5') return;
+
+      if (d.type === 'open-external') { openExternal(d.url); return; }
+
+      if (d.type === 'clipboard-copy') {
+        copyText(d.text).then(function (ok) {
+          postToFrame({ source: 'tax-shell', type: 'clipboard-copy-result', id: d.id, ok: !!ok, detail: ok ? 'ok' : 'fail' });
+        });
+        return;
+      }
+
+      // 保存图片：iOS 壳暂不做相册写入，回执失败让页面走长按保存
+      if (d.type === 'save-local-file' || d.type === 'download-url') {
+        postToFrame({ source: 'tax-shell', type: d.type + '-result', id: d.id, ok: false, detail: 'ios_no_native_save' });
+        return;
+      }
+    });
+
+    function boot() {
+      if (!APP_ORIGIN || !/^https?:\/\//i.test(APP_ORIGIN)) {
+        fatal('APP_ORIGIN 配置无效');
+        return;
+      }
+      try {
+        if (new URL(APP_ORIGIN).hostname !== ALLOWED_HOST) {
+          fatal('壳仅允许加载 ' + ALLOWED_HOST);
+          return;
+        }
+      } catch (e) { fatal('APP_ORIGIN 解析失败'); return; }
+
+      mount(buildStartUrl());
+    }
+
+    var booted = false;
+    function once() {
+      if (booted) return;
+      booted = true;
+      boot();
+    }
+
+    if (window.cordova) {
+      document.addEventListener('deviceready', function () {
+        try { if (window.StatusBar) { StatusBar.overlaysWebView(true); StatusBar.styleDefault(); } } catch (e) {}
+        once();
+      }, false);
+    }
+    // 兜底：cordova 未就绪也照样加载
+    setTimeout(once, 800);
+  })();
+  </script>
+</body>
+</html>

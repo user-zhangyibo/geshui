@@ -1,0 +1,80 @@
+<?xml version='1.0' encoding='utf-8'?>
+<widget id="com.testplatform.app" version="1.0.1" ios-CFBundleVersion="10001"
+  xmlns="http://www.w3.org/ns/widgets"
+  xmlns:cdv="http://cordova.apache.org/ns/1.0">
+
+  <name>Geshui</name>
+  <description>个人所得税 · iOS WebView 壳</description>
+  <author email="dev@localhost" href="https://localhost">Local</author>
+
+  <content src="index.html" />
+
+  <!-- 只允许加载自建站 -->
+  <access origin="https://files.flongli.top" />
+  <allow-navigation href="https://files.flongli.top/*" />
+
+  <allow-intent href="http://*/*" />
+  <allow-intent href="https://*/*" />
+  <allow-intent href="tel:*" />
+  <allow-intent href="sms:*" />
+  <allow-intent href="mailto:*" />
+  <allow-intent href="alipays://*" />
+  <allow-intent href="alipay://*" />
+  <allow-intent href="weixin://*" />
+
+  <preference name="loglevel" value="DEBUG" />
+  <preference name="loadUrlTimeoutValue" value="120000" />
+  <preference name="ShowTitle" value="false" />
+  <preference name="AutoHideSplashScreen" value="true" />
+  <preference name="SplashScreenDelay" value="0" />
+  <preference name="FadeSplashScreen" value="false" />
+  <preference name="BackgroundColor" value="0xFFFFFFFF" />
+  <preference name="StatusBarOverlaysWebView" value="true" />
+  <preference name="StatusBarStyle" value="default" />
+  <preference name="StatusBarBackgroundColor" value="#00000000" />
+  <!-- 站点用 UA 判断是否在壳内 -->
+  <preference name="AppendUserAgent" value=" TaxPlatformCordovaApp/1 (iOS)" />
+  <preference name="deployment-target" value="13.0" />
+  <preference name="AllowInlineMediaPlayback" value="true" />
+  <preference name="MediaPlaybackRequiresUserAction" value="false" />
+  <preference name="WKWebViewOnly" value="true" />
+
+  <platform name="ios">
+    <preference name="StatusBarOverlaysWebView" value="true" />
+    <preference name="StatusBarStyle" value="default" />
+
+    <icon src="res/icon/icon-1024.png" width="1024" height="1024" />
+
+    <!-- 主屏幕显示名用中文 -->
+    <config-file target="*-Info.plist" parent="CFBundleDisplayName">
+      <string>个人所得税</string>
+    </config-file>
+    <config-file target="*-Info.plist" parent="CFBundleName">
+      <string>Geshui</string>
+    </config-file>
+
+    <!-- 允许跨域 iframe（壳页面 file:// → https 站点） -->
+    <config-file target="*-Info.plist" parent="NSAppTransportSecurity">
+      <dict>
+        <key>NSAllowsArbitraryLoadsInWebContent</key>
+        <true/>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+      </dict>
+    </config-file>
+
+    <!-- 允许 file:// 页面访问远程内容 -->
+    <preference name="allowFileAccessFromFileURLs" value="true" />
+    <preference name="allowUniversalAccessFromFileURLs" value="true" />
+
+    <edit-config file="*-Info.plist" mode="merge" target="NSCameraUsageDescription">
+      <string>用于拍摄证件与反馈截图</string>
+    </edit-config>
+    <edit-config file="*-Info.plist" mode="merge" target="NSPhotoLibraryUsageDescription">
+      <string>用于保存纳税记录图片到相册</string>
+    </edit-config>
+    <edit-config file="*-Info.plist" mode="merge" target="NSPhotoLibraryAddUsageDescription">
+      <string>用于保存纳税记录图片到相册</string>
+    </edit-config>
+  </platform>
+</widget>

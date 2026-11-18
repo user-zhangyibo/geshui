@@ -1,0 +1,139 @@
+name: build-ios-ipa
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode 15.4
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '15.4'
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          node -v
+          pod --version || true
+
+      - name: Install Cordova CLI
+        run: npm install -g cordova@12
+
+      - name: Install project deps
+        run: npm install --no-audit --no-fund
+
+      - name: Add iOS platform
+        run: cordova platform add ios@7 --nosave
+
+      - name: Build (unsigned)
+        env:
+          CODE_SIGNING_ALLOWED: 'NO'
+          CODE_SIGNING_REQUIRED: 'NO'
+          CODE_SIGN_IDENTITY: ''
+          EXPANDED_CODE_SIGN_IDENTITY: ''
+          PROVISIONING_PROFILE_SPECIFIER: ''
+        run: |
+          cordova build ios --release --device --verbose 2>&1 | tail -60
+
+      - name: Locate .app
+        id: locate
+        run: |
+          set -e
+          APP=$(find platforms/ios/build -maxdepth 4 -name "*.app" -type d | head -n1)
+          if [ -z "$APP" ]; then
+            echo "未找到 .app，列出 build 目录："
+            find platforms/ios/build -maxdepth 4 -type d | head -40
+            exit 1
+          fi
+          echo "app_path=$APP" >> $GITHUB_OUTPUT
+          echo "found: $APP"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist" || true
+          /usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" "$APP/Info.plist" || true
+
+      - name: Patch Info.plist
+        run: |
+          set -e
+          APP="${{ steps.locate.outputs.app_path }}"
+          P="$APP/Info.plist"
+
+          # 主屏显示名（Cordova 的 config-file 在部分版本不生效，这里兜底）
+          /usr/libexec/PlistBuddy -c "Delete :CFBundleDisplayName" "$P" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string 个人所得税" "$P"
+
+          # ATS：允许 WKWebView 里的跨域 iframe
+          /usr/libexec/PlistBuddy -c "Delete :NSAppTransportSecurity" "$P" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$P"
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoadsInWebContent bool true" "$P"
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" "$P"
+
+          # 只允许竖屏
+          /usr/libexec/PlistBuddy -c "Delete :UISupportedInterfaceOrientations" "$P" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations array" "$P"
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations:0 string UIInterfaceOrientationPortrait" "$P"
+          /usr/libexec/PlistBuddy -c "Delete :UISupportedInterfaceOrientations~ipad" "$P" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations~ipad array" "$P" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations~ipad:0 string UIInterfaceOrientationPortrait" "$P" 2>/dev/null || true
+
+          echo "--- 结果 ---"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" "$P"
+          /usr/libexec/PlistBuddy -c "Print :NSAppTransportSecurity" "$P"
+          /usr/libexec/PlistBuddy -c "Print :UISupportedInterfaceOrientations" "$P"
+
+      - name: Pseudo-sign with ldid (TrollStore friendly)
+        continue-on-error: true
+        run: |
+          set -e
+          APP="${{ steps.locate.outputs.app_path }}"
+          EXEC=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP/Info.plist")
+          brew install ldid || true
+          cat > /tmp/ent.plist <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>platform-application</key>
+            <true/>
+            <key>com.apple.private.security.no-container</key>
+            <true/>
+            <key>com.apple.private.security.container-required</key>
+            <false/>
+            <key>get-task-allow</key>
+            <true/>
+          </dict>
+          </plist>
+          EOF
+          ldid -S/tmp/ent.plist "$APP/$EXEC"
+          echo "ldid ok: $EXEC"
+
+      - name: Package IPA
+        run: |
+          set -e
+          APP="${{ steps.locate.outputs.app_path }}"
+          rm -rf out && mkdir -p out/Payload
+          cp -R "$APP" out/Payload/
+          cd out
+          zip -qry ../geshui-ios-unsigned.ipa Payload
+          cd ..
+          ls -lh geshui-ios-unsigned.ipa
+          unzip -l geshui-ios-unsigned.ipa | head -12
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: geshui-ios-ipa
+          path: geshui-ios-unsigned.ipa
+          retention-days: 30
